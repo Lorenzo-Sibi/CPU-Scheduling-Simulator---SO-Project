@@ -3,12 +3,14 @@
 #include <assert.h>
 
 #include "fake_os.h"
+#include "fake_cpu.h"
 
 void FakeOS_init(FakeOS* os) {
   os->running=0;
   List_init(&os->ready);
   List_init(&os->waiting);
   List_init(&os->processes);
+  List_init(&os->cpus);
   os->timer=0;
   os->schedule_fn=0;
 }
@@ -173,4 +175,60 @@ void FakeOS_simStep(FakeOS* os){
 }
 
 void FakeOS_destroy(FakeOS* os) {
+
+  // Here we free allocated memory used for cpu instances
+  ListItem* aux = os->cpus.first;
+  printf("Deallocating all cpus...");
+  while(aux) {
+    FakeCPU* cpu = (FakeCPU*) aux;
+    free(cpu);
+    aux = aux->next;
+  }
+  printf("DONE.\n");
 }
+
+int FakeOS_cpu_init(FakeOS* os, const char* filename) {
+  FILE* cpu_file = fopen(filename, "r");
+  if(!cpu_file) {
+    return -1;
+  }
+  char *buffer = NULL;
+  size_t line_length = 0;
+  int num_cpu = 0;
+
+  while(getline(&buffer, &line_length, cpu_file) > 0 ) {
+    int cpu_id = -1;
+    int schedule_algo = -0x01;
+    int num_tokens = 0;
+
+    // Dynamic allocation of FakeCPU instance
+    FakeCPU* cpu = malloc(sizeof(FakeCPU));
+
+    num_tokens = sscanf(buffer, "CPU %d %d", &cpu_id, &schedule_algo);
+    if(num_tokens != 2) {
+      break;
+    }
+    cpu->id = cpu_id;
+    cpu->policy = (SchedulingAlgorithm) schedule_algo;
+    cpu->status = IDLE;
+    cpu->running = NULL;
+    List_pushBack(&os->cpus, (ListItem*) cpu);
+    num_cpu++;
+  }
+
+  if(buffer) {
+    free(buffer);
+  }
+  fclose(cpu_file);
+  return num_cpu;
+}
+
+void FakeOS_print_cpu(FakeOS* os) {
+  ListItem* aux = os->cpus.first;
+  while(aux) {
+    FakeCPU* cpu = (FakeCPU*) aux;
+    printf("id:%d, status:%d, policy:%d\n", cpu->id, cpu->status, cpu->policy);
+    aux = aux->next;
+  }
+}
+
