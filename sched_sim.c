@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include "fake_os.h"
+#include "fake_cpu.h"
 
 FakeOS os;
 
@@ -39,13 +40,22 @@ void schedRR(FakeOS* os, void* args_){
 };
 
 int main(int argc, char** argv) {
+
+  // Inizializzazione OS
   FakeOS_init(&os);
   SchedRRArgs srr_args;
   srr_args.quantum=5;
   os.schedule_args=&srr_args;
   os.schedule_fn=schedRR;
-  
-  for (int i=1; i<argc; ++i){
+
+  // Inizializzazione CPUS
+  int n_cpus = atoi(argv[1]);
+  n_cpus = FakeCPU_init(&os, n_cpus);
+  assert(n_cpus==os.num_cpus);
+  printf("Creating %d cpu's instances\n", n_cpus);
+
+  // Inizializzazione Processi
+  for (int i=2; i<argc; ++i){
     FakeProcess new_process;
     int num_events=FakeProcess_load(&new_process, argv[i]);
     printf("loading [%s], pid: %d, events:%d",

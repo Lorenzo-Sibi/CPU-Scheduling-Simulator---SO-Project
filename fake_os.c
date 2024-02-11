@@ -13,6 +13,7 @@ void FakeOS_init(FakeOS* os) {
   List_init(&os->cpus);
   os->timer=0;
   os->schedule_fn=0;
+  os.num_cpus=0;
 }
 
 void FakeOS_createProcess(FakeOS* os, FakeProcess* p) {
@@ -174,9 +175,9 @@ void FakeOS_simStep(FakeOS* os){
 
 }
 
-void FakeOS_destroy(FakeOS* os) {
+void FakeOS_destroy_cpus(FakeOS* os) {
 
-  // Here we free allocated memory used for cpu instances
+  // Deallochiamo la memoria utilizzata per le istanze cpu
   ListItem* aux = os->cpus.first;
   printf("Deallocating all cpus...");
   while(aux) {
@@ -227,7 +228,7 @@ void FakeOS_print_cpu(FakeOS* os) {
   ListItem* aux = os->cpus.first;
   while(aux) {
     FakeCPU* cpu = (FakeCPU*) aux;
-    printf("id:%d, status:%d, policy:%d\n", cpu->id, cpu->status, cpu->policy);
+    printf("CPU id:%d, status:%d\n", cpu->id, cpu->status);
     aux = aux->next;
   }
 }

@@ -11,8 +11,7 @@ typedef struct {
     ListItem list;
     int id;
     CPUStatus status;
-    SchedulingAlgorithm policy;
-    FakePCB* running;
-    ScheduleFn schedule_fn;
-    void* schedule_args;
+    FakePCB* running;  // Processo attualmente in esecuzione...
 } FakeCPU;
+
+int FakeCPU_init(FakeOS *os, int n_cpus);
