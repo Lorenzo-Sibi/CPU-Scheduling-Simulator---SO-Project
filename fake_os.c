@@ -5,15 +5,18 @@
 #include "fake_os.h"
 #include "fake_cpu.h"
 
+#ifndef DEFAULT_CPUS
+#define DEFAULT_CPUS 1
+#endif
+
 void FakeOS_init(FakeOS* os) {
-  os->running=0;
   List_init(&os->ready);
   List_init(&os->waiting);
   List_init(&os->processes);
   List_init(&os->cpus);
   os->timer=0;
   os->schedule_fn=0;
-  os.num_cpus=0;
+  os.num_cpus=DEFAULT_CPUS;
 }
 
 void FakeOS_createProcess(FakeOS* os, FakeProcess* p) {
@@ -21,7 +24,12 @@ void FakeOS_createProcess(FakeOS* os, FakeProcess* p) {
   assert(p->arrival_time==os->timer && "time mismatch in creation");
   // we check that in the list of PCBs there is no
   // pcb having the same pid
-  assert( (!os->running || os->running->pid!=p->pid) && "pid taken");
+  ListItem* aux=os->cpus.first;
+  while (aux) {
+    fakeCPU* cpu = (fakeCPU*) aux;
+    assert(!cpu->running || cpu->running->pid!=p->pid && "pid taken");
+    aux = aux->next; 
+  }
 
   ListItem* aux=os->ready.first;
   while(aux){
@@ -122,53 +130,64 @@ void FakeOS_simStep(FakeOS* os){
     }
   }
 
-  
 
   // decrement the duration of running
   // if event over, destroy event
   // and reschedule process
   // if last event, destroy running
-  FakePCB* running=os->running;
-  printf("\trunning pid: %d\n", running?running->pid:-1);
-  if (running) {
-    ProcessEvent* e=(ProcessEvent*) running->events.first;
-    assert(e->type==CPU);
-    e->duration--;
-    printf("\t\tremaining time:%d\n",e->duration);
-    if (e->duration==0){
-      printf("\t\tend burst\n");
-      List_popFront(&running->events);
-      free(e);
-      if (! running->events.first) {
-        printf("\t\tend process\n");
-        free(running); // kill process
-      } else {
-        e=(ProcessEvent*) running->events.first;
-        switch (e->type){
-        case CPU:
-          printf("\t\tmove to ready\n");
-          List_pushBack(&os->ready, (ListItem*) running);
-          break;
-        case IO:
-          printf("\t\tmove to waiting\n");
-          List_pushBack(&os->waiting, (ListItem*) running);
-          break;
+  
+  ListItem* aux=os->cpus.first;
+  while (aux) {
+    FakeCPU* cpu = (FakeCPU*) aux;
+    FakePCB* running = (FakePCB*) cpu->running;
+    printf("\trunning pid: %d\n", running?running->pid:-1);
+
+    // le operazioni di decremento/rescedule/distruzione 
+    // sono fatte per ogni processo in esecuzione su ogni cpu
+    if (running) { 
+      ProcessEvent* e=(ProcessEvent*) running->events.first;
+      assert(e->type==CPU);
+      e->duration--;
+      printf("\t\tremaining time:%d\n",e->duration);
+      if (e->duration==0){
+        printf("\t\tend burst\n");
+        List_popFront(&running->events);
+        free(e);
+        if (! running->events.first) {
+          printf("\t\tend process\n");
+          free(running); // kill process
+        } else {
+          e=(ProcessEvent*) running->events.first;
+          switch (e->type){
+          case CPU:
+            printf("\t\tmove to ready\n");
+            List_pushBack(&os->ready, (ListItem*) running);
+            break;
+          case IO:
+            printf("\t\tmove to waiting\n");
+            List_pushBack(&os->waiting, (ListItem*) running);
+            break;
+          }
         }
+        cpu->running = 0;
       }
-      os->running = 0;
     }
-  }
 
+    // TODO : gestire la lista di processi in attesa di risorse con MULTICORE
 
-  // call schedule, if defined
-  if (os->schedule_fn && ! os->running){
-    (*os->schedule_fn)(os, os->schedule_args); 
-  }
+    // call schedule, if defined
+    if (os->schedule_fn && cpu->stauts == IDLE) {
+      (*os->schedule_fn)(os, os->schedule_args); 
+    }
 
-  // if running not defined and ready queue not empty
-  // put the first in ready to run
-  if (! os->running && os->ready.first) {
-    os->running=(FakePCB*) List_popFront(&os->ready);
+    // if running not defined and ready queue not empty
+    // put the first in ready to run
+    if (cpu->stauts == IDLE && os->ready.first) {
+      FakePCB* pcb = (FakePCB*) List_popFront(&os->ready);
+      FakeCPU_assign_process(cpu, pcb);
+    }
+    
+    aux = aux->next;
   }
 
   ++os->timer;

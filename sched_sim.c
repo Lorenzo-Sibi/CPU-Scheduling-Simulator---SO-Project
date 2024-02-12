@@ -4,11 +4,19 @@
 #include "fake_os.h"
 #include "fake_cpu.h"
 
+#ifndef DEFAULT_QUANTUM
+#define DEFAULT_QUANTUM 10 /* in ms */
+#endif
+
 FakeOS os;
 
 typedef struct {
   int quantum;
 } SchedRRArgs;
+
+typedef struct {
+  float alpha;
+} SchedSJFP;
 
 void schedRR(FakeOS* os, void* args_){
   SchedRRArgs* args=(SchedRRArgs*)args_;
@@ -38,6 +46,39 @@ void schedRR(FakeOS* os, void* args_){
     List_pushFront(&pcb->events, (ListItem*)qe);
   }
 };
+
+void schedSJFP(FakeOS* os, void* args) {
+    // TODO: migliorare descrizione funzione?
+    // Implementa la logica dello scheduling preemptive shortest job first con previsione del quantum
+    // Formula per la previsione del quantum: q(t+1) = a * q_current + (1-a) * q(t)
+
+    SchedSJFP* alpha = *(SchedSJFP*)args;
+    FakePCB* shortest_job = NULL;
+
+    // Funzione AUSILIARIA? -> Valutare :)
+    ListItem* aux = os->ready.first;
+    while (aux) {
+        FakePCB* pcb = (FakePCB*)aux;
+        ProcessEvent* cpu_event = (ProcessEvent*)pcb->events.first;
+        if (!shortest_job || cpu_event->duration < ((ProcessEvent*)shortest_job->events.first)->duration) {
+            shortest_job = pcb;
+        }
+        aux = aux->next;
+    }
+
+    if (shortest_job) {
+        List_detach(&os->ready, (ListItem*)shortest_job);
+        os->running = shortest_job;
+
+        // Ora calcola il nuovo quantum
+        int old_duration = ((ProcessEvent*)shortest_job->events.first)->duration; // TODO: rendi più legeibile questa riga
+        int new_duration = alpha * old_duration + (1 - alpha) * os->quantum_prediction;
+        ((ProcessEvent*)shortest_job->events.first)->duration = new_duration;
+
+        printf("Process %d assigned to CPU with shortest CPU burst. New quant: %d\n", shortest_job->pid, new_duration);
+    }
+}
+
 
 int main(int argc, char** argv) {
 

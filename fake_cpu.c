@@ -19,3 +19,31 @@ int FakeCPU_init(FakeOS* os, int n_cpus) {
     os->n_cpus = n_cpus;
     return n_cpus;
 }
+
+FakeCPU_assign_process(FakeCPU* cpu, FakePCB* pcb)  {
+    assert(cpu->status == IDLE); // come altrimenti? :D
+    // TODO: verificare che os non abbia già una CPU con lo stesso processo in esecuzione?
+    cpu->running = pcb;
+    cpu->status = BUSY;
+    return 1;
+}
+
+FakeCPU_preempt_process(FakeCPU* cpu, FakePCB* pcb) {
+    assert(cpu-status == BUSY);
+    cpu->running = NULL;
+    cpu->status = IDLE;
+    return 1;
+}
+
+FakeCPU_find_idle(FakeOS* os) {
+
+    ListItem* aux = (ListItem*) os->cpus.first;
+    while(aux) {
+        FakeCPU* cpu = (FakeCPU*)aux;
+        if(cpu->status == IDLE) {
+            return cpu;
+        }
+        aux = aux->next;
+    }
+    return 0;
+}

@@ -15,3 +15,6 @@ typedef struct {
 } FakeCPU;
 
 int FakeCPU_init(FakeOS *os, int n_cpus);
+int FakeCPU_assign_process(FakeCPU* cpu, FakePCB* pcb);
+int FakeCPU_preempt_process(FakeCPU* cpu, FakePCB* pcb);
+FakeCPU* FakeCPU_find_idle(FakeOS* os);
