@@ -22,6 +22,7 @@ typedef struct {
   ListItem list;
   ListHead events;
   int pid;
+  int running_time;
   int predicted_burst;
   short int update_prediction;
 } FakePCB;

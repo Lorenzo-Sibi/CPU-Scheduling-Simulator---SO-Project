@@ -52,6 +52,7 @@ void FakeOS_createProcess(FakeOS* os, FakeProcess* p) {
   new_pcb->pid=p->pid;
   new_pcb->events=p->events;
   new_pcb->predicted_burst = DEFAULT_PREDICTED_BURST;
+  new_pcb->running_time = 0;
   new_pcb->update_prediction = 0;
 
   assert(new_pcb->events.first && "process without events");
@@ -148,6 +149,7 @@ void FakeOS_simStep(FakeOS* os){
     if (running) { 
       ProcessEvent* e=(ProcessEvent*) running->events.first;
       assert(e->type==CPU);
+      running->running_time++;
       e->duration--;
       printf("\t\tremaining time:%d\n",e->duration);
       if (e->duration==0){
@@ -175,21 +177,21 @@ void FakeOS_simStep(FakeOS* os){
       }
     }
 
-    // TODO : gestire la lista di processi in attesa di risorse con MULTICORE
-
-    // call schedule, if defined
-    if (os->schedule_fn && cpu->status == IDLE) {
-      (*os->schedule_fn)(os, os->schedule_args); 
-    }
 
     // if running not defined and ready queue not empty
     // put the first in ready to run
-    if (cpu->status == IDLE && os->ready.first) {
-      FakePCB* pcb = (FakePCB*) List_popFront(&os->ready);
-      FakeCPU_assign_process(cpu, pcb);
-    }
+    // if (cpu->status == IDLE && os->ready.first) {
+    //   FakePCB* pcb = (FakePCB*) List_popFront(&os->ready);
+    //   FakeCPU_assign_process(cpu, pcb);
+    // }
     
     aux = aux->next;
+  }
+  // TODO : gestire la lista di processi in attesa di risorse con MULTICORE
+
+  // call schedule, if defined
+  if (os->schedule_fn) {
+    (*os->schedule_fn)(os, os->schedule_args);
   }
 
   ++os->timer;

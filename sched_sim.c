@@ -7,6 +7,10 @@
 #define DEFAULT_QUANTUM 10 /* in ms */
 #endif
 
+#ifndef DEFAULT_ALPHA
+#define DEFAULT_ALPHA 0.6
+#endif
+
 #ifdef _LIST_DEBUG_
 #define MAX_STEPS 10000
 #endif
@@ -26,11 +30,14 @@ void schedRR(FakeOS* os, void* args_){
 
   // look for the first process in ready
   // if none, return
-  if (! os->ready.first)
+  if (!os->ready.first)
     return;
 
   FakePCB* pcb=(FakePCB*) List_popFront(&os->ready);
   FakeCPU* cpu_idle = FakeCPU_find_idle(os);
+  
+  if(!cpu_idle) return;
+  
   FakeCPU_assign_process(cpu_idle, pcb);
   
   assert(pcb->events.first);
@@ -58,17 +65,38 @@ void update_predicted_burst(FakeOS* os, float alpha) {
     FakePCB* pcb_r = aux_r ? (FakePCB*) aux_r : 0;
     FakePCB* pcb_w = aux_w ? (FakePCB*) aux_w : 0;
     if(pcb_r && pcb_r->update_prediction) {
-      pcb_r->predicted_burst = alpha * pcb_r->predicted_burst + (1 - alpha) * pcb_r->predicted_burst;
+      pcb_r->predicted_burst = alpha * pcb_r->running_time + (1 - alpha) * pcb_r->predicted_burst;
       pcb_r->update_prediction = 0;
+      pcb_r->running_time = 0;
+      printf("\t\tReady process %d: predicted burst updated to %d\n", pcb_r->pid, pcb_r->predicted_burst);
     }
     if(pcb_w && pcb_w->update_prediction) {
-      pcb_w->predicted_burst = alpha * pcb_w->predicted_burst + (1 - alpha) * pcb_w->predicted_burst;
+      pcb_w->predicted_burst = alpha * pcb_w->running_time + (1 - alpha) * pcb_w->predicted_burst;
       pcb_w->update_prediction = 0;
+      pcb_w->running_time = 0;
+      printf("\t\tWaiting process %d: predicted burst updated to %d\n", pcb_w->pid, pcb_w->predicted_burst);
     }
 
     if(aux_r) aux_r = aux_r->next;
     if(aux_w) aux_w = aux_w->next;
   }
+}
+
+void check_terminated_quant(FakeOS* os) {
+  ListItem* aux = os->cpus.first;
+  while (aux) {
+    FakeCPU* cpu = (FakeCPU*) aux;
+    FakePCB* running = cpu->running;
+    if(running) {
+      ProcessEvent* current_event = (ProcessEvent*) running->events.first;
+      assert(current_event->type == CPU);
+      // al prosimo step il processo verrà messo in waiting o in ready, ad ogni modo il suo quant è terminato e va aggiornato
+      if(current_event->duration == 1) running->update_prediction = 1;
+    }
+
+    aux = aux->next;
+  }
+  
 }
 
 void schedSJFP(FakeOS* os, void* args_) {
@@ -79,6 +107,7 @@ void schedSJFP(FakeOS* os, void* args_) {
   float alpha = args->alpha;
   FakePCB* shortest_job = NULL;
 
+  check_terminated_quant(os);
   update_predicted_burst(os, alpha);
 
   ListItem* aux = os->ready.first;
@@ -105,10 +134,6 @@ void schedSJFP(FakeOS* os, void* args_) {
       e->duration -= shortest_job->predicted_burst;
       List_pushFront(&shortest_job->events, (ListItem*)qu_e);
     }
-    else if (e->duration == 1) {
-      // al prosimo step il processo verrà messo in waiting o in ready, ad ogni modo il suo quant è terminato e va aggiornato
-      shortest_job->update_prediction = 1;
-    }
     //printf("Process %d assigned to CPU with shortest CPU burst. New quant: %d\n", shortest_job->pid, new_duration);
   }
 }
@@ -123,10 +148,11 @@ int main(int argc, char** argv) {
   // Inizializzazione OS
   FakeOS_init(&os);
   SchedRRArgs srr_args;
-  srr_args.quantum=5;
+  srr_args.quantum=DEFAULT_QUANTUM;
   SchedSJFPArgs sjfp_args;
-  sjfp_args.alpha=0.5;
+  sjfp_args.alpha=DEFAULT_ALPHA;
 
+  // Settaggio algoritmo di scheduling
   os.schedule_args=&sjfp_args;
   os.schedule_fn=schedSJFP;
 
@@ -165,6 +191,6 @@ int main(int argc, char** argv) {
     }
     FakeOS_simStep(&os);
   }
-  printf("************** END SIMULATION **************\n");
+  printf("************** SIMULATION ENDED **************\n");
   FakeOS_destroy_cpus(&os);
 }
