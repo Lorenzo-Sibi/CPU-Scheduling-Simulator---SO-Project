@@ -3,11 +3,12 @@
 #include <assert.h>
 
 #include "fake_os.h"
-#include "fake_cpu.h"
 
 #ifndef DEFAULT_CPUS
 #define DEFAULT_CPUS 1
 #endif
+
+#define DEFAULT_PREDICTED_BURST 5
 
 void FakeOS_init(FakeOS* os) {
   List_init(&os->ready);
@@ -16,7 +17,7 @@ void FakeOS_init(FakeOS* os) {
   List_init(&os->cpus);
   os->timer=0;
   os->schedule_fn=0;
-  os.num_cpus=DEFAULT_CPUS;
+  os->num_cpus=DEFAULT_CPUS;
 }
 
 void FakeOS_createProcess(FakeOS* os, FakeProcess* p) {
@@ -26,12 +27,12 @@ void FakeOS_createProcess(FakeOS* os, FakeProcess* p) {
   // pcb having the same pid
   ListItem* aux=os->cpus.first;
   while (aux) {
-    fakeCPU* cpu = (fakeCPU*) aux;
+    FakeCPU* cpu = (FakeCPU*) aux;
     assert(!cpu->running || cpu->running->pid!=p->pid && "pid taken");
     aux = aux->next; 
   }
 
-  ListItem* aux=os->ready.first;
+  aux=os->ready.first;
   while(aux){
     FakePCB* pcb=(FakePCB*)aux;
     assert(pcb->pid!=p->pid && "pid taken");
@@ -50,6 +51,8 @@ void FakeOS_createProcess(FakeOS* os, FakeProcess* p) {
   new_pcb->list.next=new_pcb->list.prev=0;
   new_pcb->pid=p->pid;
   new_pcb->events=p->events;
+  new_pcb->predicted_burst = DEFAULT_PREDICTED_BURST;
+  new_pcb->update_prediction = 0;
 
   assert(new_pcb->events.first && "process without events");
 
@@ -68,8 +71,6 @@ void FakeOS_createProcess(FakeOS* os, FakeProcess* p) {
     ;
   }
 }
-
-
 
 
 void FakeOS_simStep(FakeOS* os){
@@ -136,13 +137,13 @@ void FakeOS_simStep(FakeOS* os){
   // and reschedule process
   // if last event, destroy running
   
-  ListItem* aux=os->cpus.first;
+  aux=os->cpus.first;
   while (aux) {
     FakeCPU* cpu = (FakeCPU*) aux;
     FakePCB* running = (FakePCB*) cpu->running;
-    printf("\trunning pid: %d\n", running?running->pid:-1);
+    printf("\tCPU[%d]->running pid: %d\n",cpu->id, running?running->pid:-1);
 
-    // le operazioni di decremento/rescedule/distruzione 
+    // le operazioni di decremento/reschedule/distruzione 
     // sono fatte per ogni processo in esecuzione su ogni cpu
     if (running) { 
       ProcessEvent* e=(ProcessEvent*) running->events.first;
@@ -153,6 +154,7 @@ void FakeOS_simStep(FakeOS* os){
         printf("\t\tend burst\n");
         List_popFront(&running->events);
         free(e);
+        FakeCPU_to_idle(cpu);
         if (! running->events.first) {
           printf("\t\tend process\n");
           free(running); // kill process
@@ -176,13 +178,13 @@ void FakeOS_simStep(FakeOS* os){
     // TODO : gestire la lista di processi in attesa di risorse con MULTICORE
 
     // call schedule, if defined
-    if (os->schedule_fn && cpu->stauts == IDLE) {
+    if (os->schedule_fn && cpu->status == IDLE) {
       (*os->schedule_fn)(os, os->schedule_args); 
     }
 
     // if running not defined and ready queue not empty
     // put the first in ready to run
-    if (cpu->stauts == IDLE && os->ready.first) {
+    if (cpu->status == IDLE && os->ready.first) {
       FakePCB* pcb = (FakePCB*) List_popFront(&os->ready);
       FakeCPU_assign_process(cpu, pcb);
     }
@@ -194,53 +196,79 @@ void FakeOS_simStep(FakeOS* os){
 
 }
 
+
+int FakeCPU_init(FakeOS* os, int n_cpus) {
+    int loaded = 0;
+    for(int i = 0; i < n_cpus; i++) {
+        FakeCPU new_cpu;
+        new_cpu.id = i;
+        new_cpu.status = IDLE;
+        new_cpu.running = NULL;
+
+        FakeCPU* cpu_ptr = (FakeCPU*)malloc(sizeof(FakeCPU));
+        *cpu_ptr = new_cpu;
+        cpu_ptr->list.next = cpu_ptr->list.prev = 0;
+        if (List_pushBack(&os->cpus, (ListItem*) cpu_ptr)) {
+          loaded++;
+        }
+    }
+    os->num_cpus = loaded;
+    return loaded;
+}
+
+FakeCPU* FakeCPU_find_idle(FakeOS* os) {
+
+    ListItem* aux = (ListItem*) os->cpus.first;
+    while(aux) {
+        FakeCPU* cpu = (FakeCPU*)aux;
+        if(cpu->status == IDLE) {
+            return cpu;
+        }
+        aux = aux->next;
+    }
+    return 0;
+}
+
+int FakeCPU_assign_process(FakeCPU* cpu, FakePCB* pcb)  {
+    assert(cpu->status == IDLE); // come altrimenti? :D
+    // TODO: verificare che os non abbia già una CPU con lo stesso processo in esecuzione?
+    cpu->running = pcb;
+    cpu->status = BUSY;
+    return 1;
+}
+
+int FakeCPU_to_idle(FakeCPU* cpu) {
+    assert(cpu->status == BUSY);
+    cpu->running = NULL;
+    cpu->status = IDLE;
+    return 1;
+}
+
 void FakeOS_destroy_cpus(FakeOS* os) {
 
   // Deallochiamo la memoria utilizzata per le istanze cpu
   ListItem* aux = os->cpus.first;
-  printf("Deallocating all cpus...");
+  printf("\nDeallocating all cpus...");
   while(aux) {
     FakeCPU* cpu = (FakeCPU*) aux;
-    free(cpu);
     aux = aux->next;
+    free(cpu);
   }
-  printf("DONE.\n");
+  printf("DONE.");
 }
 
-int FakeOS_cpu_init(FakeOS* os, const char* filename) {
-  FILE* cpu_file = fopen(filename, "r");
-  if(!cpu_file) {
-    return -1;
-  }
-  char *buffer = NULL;
-  size_t line_length = 0;
-  int num_cpu = 0;
+int FakeOS_check_all_idle(FakeOS* os) {
+  ListItem* aux = (ListItem*) os->cpus.first;
+  while(aux) {
+    FakeCPU* cpu = (FakeCPU*) aux;
 
-  while(getline(&buffer, &line_length, cpu_file) > 0 ) {
-    int cpu_id = -1;
-    int schedule_algo = -0x01;
-    int num_tokens = 0;
-
-    // Dynamic allocation of FakeCPU instance
-    FakeCPU* cpu = malloc(sizeof(FakeCPU));
-
-    num_tokens = sscanf(buffer, "CPU %d %d", &cpu_id, &schedule_algo);
-    if(num_tokens != 2) {
-      break;
+    if(cpu->status == BUSY) {
+      return 0;
     }
-    cpu->id = cpu_id;
-    cpu->policy = (SchedulingAlgorithm) schedule_algo;
-    cpu->status = IDLE;
-    cpu->running = NULL;
-    List_pushBack(&os->cpus, (ListItem*) cpu);
-    num_cpu++;
-  }
 
-  if(buffer) {
-    free(buffer);
+    aux = aux->next;
   }
-  fclose(cpu_file);
-  return num_cpu;
+  return 1;
 }
 
 void FakeOS_print_cpu(FakeOS* os) {
@@ -251,4 +279,3 @@ void FakeOS_print_cpu(FakeOS* os) {
     aux = aux->next;
   }
 }
-

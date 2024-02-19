@@ -4,7 +4,8 @@ AR=ar
 
 OBJS=linked_list.o\
      fake_process.o\
-     fake_os.o
+	 fake_os.o
+	 
 
 HEADERS=linked_list.h  fake_process.h
 

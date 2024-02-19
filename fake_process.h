@@ -18,6 +18,14 @@ typedef struct {
   ListHead events;
 } FakeProcess;
 
+typedef struct {
+  ListItem list;
+  ListHead events;
+  int pid;
+  int predicted_burst;
+  short int update_prediction;
+} FakePCB;
+
 int FakeProcess_load(FakeProcess* p, const char* filename);
 
 int FakeProcess_save(const FakeProcess* p, const char* filename);

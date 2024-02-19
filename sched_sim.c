@@ -2,10 +2,13 @@
 #include <stdlib.h>
 #include <assert.h>
 #include "fake_os.h"
-#include "fake_cpu.h"
 
 #ifndef DEFAULT_QUANTUM
 #define DEFAULT_QUANTUM 10 /* in ms */
+#endif
+
+#ifdef _LIST_DEBUG_
+#define MAX_STEPS 10000
 #endif
 
 FakeOS os;
@@ -16,10 +19,10 @@ typedef struct {
 
 typedef struct {
   float alpha;
-} SchedSJFP;
+} SchedSJFPArgs;
 
 void schedRR(FakeOS* os, void* args_){
-  SchedRRArgs* args=(SchedRRArgs*)args_;
+  SchedRRArgs* args=(SchedRRArgs*)args_; // quantum
 
   // look for the first process in ready
   // if none, return
@@ -27,7 +30,8 @@ void schedRR(FakeOS* os, void* args_){
     return;
 
   FakePCB* pcb=(FakePCB*) List_popFront(&os->ready);
-  os->running=pcb;
+  FakeCPU* cpu_idle = FakeCPU_find_idle(os);
+  FakeCPU_assign_process(cpu_idle, pcb);
   
   assert(pcb->events.first);
   ProcessEvent* e = (ProcessEvent*)pcb->events.first;
@@ -47,59 +51,99 @@ void schedRR(FakeOS* os, void* args_){
   }
 };
 
-void schedSJFP(FakeOS* os, void* args) {
-    // TODO: migliorare descrizione funzione?
-    // Implementa la logica dello scheduling preemptive shortest job first con previsione del quantum
-    // Formula per la previsione del quantum: q(t+1) = a * q_current + (1-a) * q(t)
-
-    SchedSJFP* alpha = *(SchedSJFP*)args;
-    FakePCB* shortest_job = NULL;
-
-    // Funzione AUSILIARIA? -> Valutare :)
-    ListItem* aux = os->ready.first;
-    while (aux) {
-        FakePCB* pcb = (FakePCB*)aux;
-        ProcessEvent* cpu_event = (ProcessEvent*)pcb->events.first;
-        if (!shortest_job || cpu_event->duration < ((ProcessEvent*)shortest_job->events.first)->duration) {
-            shortest_job = pcb;
-        }
-        aux = aux->next;
+void update_predicted_burst(FakeOS* os, float alpha) {
+  ListItem* aux_r = os->ready.first;
+  ListItem* aux_w = os->waiting.first;
+  while(aux_r || aux_w) {
+    FakePCB* pcb_r = aux_r ? (FakePCB*) aux_r : 0;
+    FakePCB* pcb_w = aux_w ? (FakePCB*) aux_w : 0;
+    if(pcb_r && pcb_r->update_prediction) {
+      pcb_r->predicted_burst = alpha * pcb_r->predicted_burst + (1 - alpha) * pcb_r->predicted_burst;
+      pcb_r->update_prediction = 0;
+    }
+    if(pcb_w && pcb_w->update_prediction) {
+      pcb_w->predicted_burst = alpha * pcb_w->predicted_burst + (1 - alpha) * pcb_w->predicted_burst;
+      pcb_w->update_prediction = 0;
     }
 
-    if (shortest_job) {
-        List_detach(&os->ready, (ListItem*)shortest_job);
-        os->running = shortest_job;
-
-        // Ora calcola il nuovo quantum
-        int old_duration = ((ProcessEvent*)shortest_job->events.first)->duration; // TODO: rendi più legeibile questa riga
-        int new_duration = alpha * old_duration + (1 - alpha) * os->quantum_prediction;
-        ((ProcessEvent*)shortest_job->events.first)->duration = new_duration;
-
-        printf("Process %d assigned to CPU with shortest CPU burst. New quant: %d\n", shortest_job->pid, new_duration);
-    }
+    if(aux_r) aux_r = aux_r->next;
+    if(aux_w) aux_w = aux_w->next;
+  }
 }
 
+void schedSJFP(FakeOS* os, void* args_) {
+  // TODO: migliorare descrizione funzione?
+  // Implementa la logica dello scheduling preemptive shortest job first con previsione del quantum
+  // Formula per la previsione del quantum: q(t+1) = a * q_current + (1-a) * q(t)
+  SchedSJFPArgs* args = (SchedSJFPArgs*)args_;
+  float alpha = args->alpha;
+  FakePCB* shortest_job = NULL;
+
+  update_predicted_burst(os, alpha);
+
+  ListItem* aux = os->ready.first;
+  while (aux) {
+    FakePCB* pcb = (FakePCB*)aux;
+    if (!shortest_job || pcb->predicted_burst < shortest_job->predicted_burst) {
+      shortest_job = pcb;
+    }
+    aux = aux->next;
+  }
+
+  FakeCPU* cpu_idle = FakeCPU_find_idle(os);
+  if (shortest_job && cpu_idle) {
+    List_detach(&os->ready, (ListItem*)shortest_job);
+    FakeCPU_assign_process(cpu_idle, shortest_job);
+
+    ProcessEvent* e = (ProcessEvent*)shortest_job->events.first;
+    assert(e->type == CPU);
+    if(e->duration > shortest_job->predicted_burst) {
+      ProcessEvent* qu_e = (ProcessEvent*)malloc(sizeof(ProcessEvent));
+      qu_e->list.prev = qu_e->list.next = 0;
+      qu_e->type = CPU; // assert fatta!
+      qu_e->duration = shortest_job->predicted_burst;
+      e->duration -= shortest_job->predicted_burst;
+      List_pushFront(&shortest_job->events, (ListItem*)qu_e);
+    }
+    else if (e->duration == 1) {
+      // al prosimo step il processo verrà messo in waiting o in ready, ad ogni modo il suo quant è terminato e va aggiornato
+      shortest_job->update_prediction = 1;
+    }
+    //printf("Process %d assigned to CPU with shortest CPU burst. New quant: %d\n", shortest_job->pid, new_duration);
+  }
+}
 
 int main(int argc, char** argv) {
+
+  if (argc < 3) {
+    printf("Usage: %s <number_of_cpus> <process_file_1.txt> <process_file_2.txt> ...\n", argv[0]);
+    return -1;
+  }
 
   // Inizializzazione OS
   FakeOS_init(&os);
   SchedRRArgs srr_args;
   srr_args.quantum=5;
-  os.schedule_args=&srr_args;
-  os.schedule_fn=schedRR;
+  SchedSJFPArgs sjfp_args;
+  sjfp_args.alpha=0.5;
+
+  os.schedule_args=&sjfp_args;
+  os.schedule_fn=schedSJFP;
+
+  printf("OS initialized.\n");
 
   // Inizializzazione CPUS
   int n_cpus = atoi(argv[1]);
   n_cpus = FakeCPU_init(&os, n_cpus);
   assert(n_cpus==os.num_cpus);
-  printf("Creating %d cpu's instances\n", n_cpus);
+  printf("Creating %d cpu's instances...\n", n_cpus);
+  FakeOS_print_cpu(&os);
 
   // Inizializzazione Processi
   for (int i=2; i<argc; ++i){
     FakeProcess new_process;
     int num_events=FakeProcess_load(&new_process, argv[i]);
-    printf("loading [%s], pid: %d, events:%d",
+    printf("loading process [%s], pid: %d, events:%d\n",
            argv[i], new_process.pid, num_events);
     if (num_events) {
       FakeProcess* new_process_ptr=(FakeProcess*)malloc(sizeof(FakeProcess));
@@ -108,10 +152,19 @@ int main(int argc, char** argv) {
     }
   }
   printf("num processes in queue %d\n", os.processes.size);
-  while(os.running
+
+
+  int steps = 0;
+  while(FakeOS_check_all_idle(&os)
         || os.ready.first
         || os.waiting.first
         || os.processes.first){
+    if(steps++>MAX_STEPS) {
+      printf("************* MAX STEPS REACHED ************\n");
+      break;
+    }
     FakeOS_simStep(&os);
   }
+  printf("************** END SIMULATION **************\n");
+  FakeOS_destroy_cpus(&os);
 }
