@@ -1,6 +1,8 @@
 CC=gcc
-CCOPTS=--std=gnu99 -Wall -D_LIST_DEBUG_ 
+CCOPTS=--std=gnu99 -Wall -D_LIST_DEBUG_ -g
 AR=ar
+
+VALGRIND_OPTS=--leak-check=full
 
 OBJS=linked_list.o\
      fake_process.o\

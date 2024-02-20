@@ -181,7 +181,7 @@ int main(int argc, char** argv) {
 
 
   int steps = 0;
-  while(FakeOS_check_all_idle(&os)
+  while(!FakeOS_check_all_idle(&os)
         || os.ready.first
         || os.waiting.first
         || os.processes.first){

@@ -113,7 +113,7 @@ void FakeOS_simStep(FakeOS* os){
       List_detach(&os->waiting, (ListItem*)pcb);
       if (! pcb->events.first) {
         // kill process
-        printf("\t\tend process\n");
+        printf("\t\tend process [%d]\n", pcb->pid);
         free(pcb);
       } else {
         //handle next event
@@ -158,7 +158,7 @@ void FakeOS_simStep(FakeOS* os){
         free(e);
         FakeCPU_to_idle(cpu);
         if (! running->events.first) {
-          printf("\t\tend process\n");
+          printf("\t\tend process [%d]\n", running->pid);
           free(running); // kill process
         } else {
           e=(ProcessEvent*) running->events.first;
@@ -255,6 +255,7 @@ void FakeOS_destroy_cpus(FakeOS* os) {
     FakeCPU* cpu = (FakeCPU*) aux;
     aux = aux->next;
     free(cpu);
+
   }
   printf("DONE.");
 }
